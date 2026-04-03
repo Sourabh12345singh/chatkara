@@ -1,5 +1,5 @@
-import type { Request } from "express";
-import type { Document } from "mongoose";
+import type { Request, Response, NextFunction } from "express";
+import type { Document, Types } from "mongoose";
 
 export type AuthUser = {
   _id: string;
@@ -22,3 +22,5 @@ export type MessageDocument = Document & {
 export type AuthenticatedRequest = Request & {
   user?: AuthUser;
 };
+
+export type AuthController = (req: AuthenticatedRequest, res: Response, next?: NextFunction) => Promise<Response | undefined> | Response | undefined;

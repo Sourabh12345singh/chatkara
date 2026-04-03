@@ -41,7 +41,9 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     const senderId = req.user?._id;
     const { text, image } = req.body as { text?: string; image?: string };
 
-    if (!senderId) return res.status(401).json({ message: "Unauthorized request" });
+    if (!senderId || !receiverId || Array.isArray(receiverId)) {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
 
     const newMessage = await Message.create({
       senderId,

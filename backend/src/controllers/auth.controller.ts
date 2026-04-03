@@ -25,7 +25,8 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
   try {
     const user = await User.findOne({ email });
-    if (!user || !password || !(await bcrypt.compare(password, user.password))) {
+    // Check if user exists and has a password (for regular users)
+    if (!user || !user.password || !password || !(await bcrypt.compare(password, user.password))) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
     generateToken(user._id.toString(), res);
@@ -46,11 +47,23 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
     if (!profilePic) return res.status(400).json({ message: "Profile pic is required" });
     if (!req.user?._id) return res.status(401).json({ message: "Unauthorized request" });
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic, { folder: "profile_pics" });
-    const updatedUser = await User.findByIdAndUpdate(req.user._id, { profilePic: uploadResponse.secure_url }, { new: true });
+    const hasCloudinaryConfig =
+      Boolean(process.env.CLOUDINARY_CLOUD_NAME) &&
+      Boolean(process.env.CLOUDINARY_API_KEY) &&
+      Boolean(process.env.CLOUDINARY_API_SECRET);
+
+    const profilePicUrl = hasCloudinaryConfig
+      ? (await cloudinary.uploader.upload(profilePic, { folder: "profile_pics" })).secure_url
+      : profilePic;
+
+    const updatedUser = await User.findByIdAndUpdate(req.user._id, { profilePic: profilePicUrl }, { new: true });
     res.status(200).json(updatedUser);
-  } catch {
-    res.status(500).json({ message: "Internal server error" });
+  } catch (error) {
+    console.error("updateProfile error:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: process.env.NODE_ENV === "production" ? undefined : error instanceof Error ? error.message : String(error),
+    });
   }
 };
 

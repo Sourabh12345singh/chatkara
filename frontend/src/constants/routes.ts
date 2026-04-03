@@ -7,17 +7,21 @@ export const ROUTES = {
   chat: (userId: string) => `/chat/${userId}`,
 } as const;
 
+// NOTE: baseURL already includes /api, so routes here are relative to /api
 export const API_ROUTES = {
   auth: {
-    base: "/auth",
     signup: "/auth/signup",
     login: "/auth/login",
     logout: "/auth/logout",
     updateProfile: "/auth/update-profile",
     checkAuth: "/auth/check",
+    // ============================================
+    // GOOGLE OAUTH ROUTES
+    // ============================================
+    google: "/auth/google",
+    googleCallback: "/auth/google/callback",
   },
   messages: {
-    base: "/messages",
     getUsers: "/messages/users",
     getMessages: (userId: string) => `/messages/${userId}`,
     sendMessage: (userId: string) => `/messages/send/${userId}`,

@@ -5,6 +5,12 @@ export type User = {
   profilePic: string;
   createdAt?: string;
   updatedAt?: string;
+  lastMessage?: {
+    text: string;
+    senderId?: string;
+    createdAt?: string;
+  };
+  lastRead?: string;
 };
 
 export type Message = {
@@ -32,7 +38,7 @@ export type Group = {
   groupPic: string;
   admin: User;
   members: User[];
-  lastMessage?: string;
+  lastMessage?: string | Message;
   createdAt: string;
   updatedAt: string;
 };

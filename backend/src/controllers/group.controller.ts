@@ -23,22 +23,19 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
 
     const adminId = req.user?._id;
 
-    // ✅ Auth check
     if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // ✅ Name validation
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Group name is required" });
     }
 
-    // ✅ Members validation
     if (!Array.isArray(members) || members.length === 0) {
       return res.status(400).json({ message: "Please select at least one member" });
     }
 
-    // ✅ Sanitize members (remove duplicates, nulls, admin)
+    // Sanitize members (remove duplicates, nulls, admin)
     const sanitizedMembers = [
       ...new Set(
         members
@@ -47,7 +44,7 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
       ),
     ];
 
-    // ✅ Fetch only valid users
+    // Fetch only valid users
     const existingUsers = await User.find({
       _id: { $in: sanitizedMembers },
     }).select("_id");
@@ -56,19 +53,18 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
       user._id.toString()
     );
 
-    // ✅ Ensure at least 1 valid member
     if (validMemberIds.length === 0) {
       return res.status(400).json({
         message: "Please select at least one valid member",
       });
     }
 
-    // ✅ Add admin to group members
+    // Add admin to group members
     const allMembers = [
       ...new Set([adminId.toString(), ...validMemberIds]),
     ];
 
-    // ✅ Create group
+    //  Create group
     const group = await Group.create({
       name: name.trim(),
       groupPic: groupPic || "",

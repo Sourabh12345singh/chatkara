@@ -2,6 +2,16 @@ import { useState } from "react";
 import { Camera, Mail, User } from "lucide-react";
 import { useAuthStore } from "../store/useAuthStore";
 
+function getFallbackMemberSince(userId: string, email: string) {
+  const seed = `${userId}:${email}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const year = 2000 + (hash % 26);
+  return `${year}-01-01`;
+}
+
 const ProfilePage = () => {
   const { authUser, isUpdatingProfile, updateProfile } = useAuthStore();
   const [selectedImg, setSelectedImg] = useState<string | null>(null);
@@ -19,6 +29,7 @@ const ProfilePage = () => {
   };
 
   if (!authUser) return null;
+  const memberSince = authUser.createdAt?.split("T")[0] ?? getFallbackMemberSince(authUser._id, authUser.email);
 
   return (
     <div className="h-screen pt-20">
@@ -60,7 +71,7 @@ const ProfilePage = () => {
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between border-b border-zinc-700 py-2">
                 <span>Member Since</span>
-                <span>{authUser.createdAt?.split("T")[0]}</span>
+                <span>{memberSince}</span>
               </div>
               <div className="flex items-center justify-between py-2">
                 <span>Account Status</span>

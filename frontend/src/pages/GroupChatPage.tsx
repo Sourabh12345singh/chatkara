@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/useAuthStore";
 import { useChatStore } from "../store/useChatStore";
@@ -50,6 +50,12 @@ const GroupChatPage = () => {
   const [newMembers, setNewMembers] = useState<string[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingMoreRef = useRef(false);
+  const prevScrollHeightRef = useRef(0);
+  const prevScrollTopRef = useRef(0);
+  const pendingScrollAdjustRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const editImageInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,7 +87,24 @@ const GroupChatPage = () => {
   }, [groupId, setSelectedGroup, getGroupMessages]);
 
   useEffect(() => {
+    if (pendingScrollAdjustRef.current) return;
+    if (!shouldAutoScrollRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [groupMessages]);
+
+  useEffect(() => {
+    if (!isMessagesLoading) {
+      isLoadingMoreRef.current = false;
+    }
+  }, [isMessagesLoading]);
+
+  useLayoutEffect(() => {
+    if (!pendingScrollAdjustRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const newScrollTop = container.scrollHeight - prevScrollHeightRef.current + prevScrollTopRef.current;
+    container.scrollTop = newScrollTop;
+    pendingScrollAdjustRef.current = false;
   }, [groupMessages]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -200,19 +223,24 @@ const GroupChatPage = () => {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {groupPagination?.hasMore && groupId && (
-            <div className="flex justify-center pb-2">
-              <button
-                type="button"
-                className="btn btn-outline btn-sm"
-                disabled={isMessagesLoading}
-                onClick={() => void getGroupMessages(groupId, true)}
-              >
-                Load more
-              </button>
-            </div>
-          )}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-4"
+          onScroll={(e) => {
+            if (!groupPagination?.hasMore || !groupId) return;
+            if (isMessagesLoading || isLoadingMoreRef.current) return;
+            const target = e.currentTarget;
+            const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 40;
+            shouldAutoScrollRef.current = atBottom;
+            if (target.scrollTop <= 0) {
+              isLoadingMoreRef.current = true;
+              prevScrollHeightRef.current = target.scrollHeight;
+              prevScrollTopRef.current = target.scrollTop;
+              pendingScrollAdjustRef.current = true;
+              void getGroupMessages(groupId, true);
+            }
+          }}
+        >
           {isMessagesLoading ? (
             <div className="flex justify-center p-4">
               <Loader2 className="size-6 animate-spin" />

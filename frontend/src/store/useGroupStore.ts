@@ -60,7 +60,16 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     set({ isGroupsLoading: true });
     try {
       const res = await axiosInstance.get<Group[]>("/groups");
-      set({ groups: res.data });
+      const sorted = [...res.data].sort((a, b) => {
+        const aTime = typeof a.lastMessage === "object" && a.lastMessage?.createdAt
+          ? new Date(a.lastMessage.createdAt).getTime()
+          : 0;
+        const bTime = typeof b.lastMessage === "object" && b.lastMessage?.createdAt
+          ? new Date(b.lastMessage.createdAt).getTime()
+          : 0;
+        return bTime - aTime;
+      });
+      set({ groups: sorted });
     } catch {
       toast.error("Failed to load groups");
     } finally {

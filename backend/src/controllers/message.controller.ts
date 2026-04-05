@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import Message from "../models/message.model";
+import Conversation from "../models/conversation.model";
 import User from "../models/user.model";
 import { getReceiverSocketId, io } from "../lib/socket";
 import type { AuthenticatedRequest } from "../types";
@@ -23,29 +24,34 @@ export const getUsersForSidebar = async (req: AuthenticatedRequest, res: Respons
     if (!loggedInUserId) return res.status(401).json({ message: "Unauthorized request" });
 
     const users = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
-    const messages = await Message.find({
-      $or: [
-        { senderId: loggedInUserId },
-        { receiverId: loggedInUserId },
-      ],
-    })
-      .select("senderId receiverId createdAt")
-      .sort({ createdAt: -1 });
+    const conversations = await Conversation.find({ participants: loggedInUserId }).sort({ "lastMessage.createdAt": -1 });
+    const conversationMap = new Map<string, typeof conversations[number]>();
 
-    const lastMessageByUser = new Map<string, Date>();
-
-    messages.forEach((message) => {
-      const senderId = message.senderId.toString();
-      const receiverId = message.receiverId?.toString();
-      const otherUserId = senderId === loggedInUserId.toString() ? receiverId : senderId;
-
-      if (!otherUserId || lastMessageByUser.has(otherUserId)) return;
-      lastMessageByUser.set(otherUserId, message.createdAt);
+    conversations.forEach((conv) => {
+      const otherId = conv.participants.find((id) => id.toString() !== loggedInUserId.toString());
+      if (!otherId) return;
+      conversationMap.set(otherId.toString(), conv);
     });
 
-    const sortedUsers = users.sort((a, b) => {
-      const aTime = lastMessageByUser.get(a._id.toString())?.getTime() ?? 0;
-      const bTime = lastMessageByUser.get(b._id.toString())?.getTime() ?? 0;
+    const enrichedUsers = users.map((user) => {
+      const conv = conversationMap.get(user._id.toString());
+      const lastRead = conv?.lastRead?.get(loggedInUserId.toString());
+      return {
+        ...user.toObject(),
+        lastMessage: conv?.lastMessage
+          ? {
+            text: conv.lastMessage.text,
+            senderId: conv.lastMessage.senderId?.toString(),
+            createdAt: conv.lastMessage.createdAt?.toISOString(),
+          }
+          : undefined,
+        lastRead: lastRead ? lastRead.toISOString() : undefined,
+      };
+    });
+
+    const sortedUsers = enrichedUsers.sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
       return bTime - aTime;
     });
 
@@ -78,6 +84,11 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
       .limit(limit)
       .populate("senderId", "fullName profilePic");
 
+    const conversation = await Conversation.findOne({ conversationId });
+    if (conversation) {
+      conversation.lastRead.set(myId.toString(), new Date());
+      await conversation.save();
+    }
       
 
     // Get total count for pagination info
@@ -121,6 +132,22 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       image: image ?? "",
     });
 
+    const now = new Date();
+    await Conversation.findOneAndUpdate(
+      { conversationId },
+      {
+        conversationId,
+        participants: [senderId, receiverId],
+        lastMessage: {
+          text: text ?? "",
+          senderId,
+          createdAt: now,
+        },
+        $set: { [`lastRead.${senderId.toString()}`]: now },
+      },
+      { upsert: true, new: true }
+    );
+
     const populatedMessage = await Message.findById(newMessage._id).populate("senderId", "fullName profilePic");
 
     void upsertMessageEmbedding({
@@ -156,6 +183,22 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
           conversationId,
           text: aiResult.reply,
         });
+
+        const metaNow = new Date();
+        await Conversation.findOneAndUpdate(
+          { conversationId },
+          {
+            conversationId,
+            participants: [senderId, receiverId],
+            lastMessage: {
+              text: aiResult.reply,
+              senderId: metaUser._id,
+              createdAt: metaNow,
+            },
+            $set: { [`lastRead.${metaUser._id.toString()}`]: metaNow },
+          },
+          { upsert: true, new: true }
+        );
 
         const populatedAi = await Message.findById(aiMessage._id).populate("senderId", "fullName profilePic");
         const metaPayload = {

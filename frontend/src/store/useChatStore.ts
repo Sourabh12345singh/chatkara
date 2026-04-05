@@ -25,6 +25,8 @@ const getConversationId = (userId1: string, userId2: string) => {
   return `conv_${sorted[0]}_${sorted[1]}`;
 };
 
+const META_EMAIL = "metaai@system.local";
+
 type PaginationInfo = {
   page: number;
   limit: number;
@@ -40,11 +42,14 @@ type ChatState = {
   isUsersLoading: boolean;
   isMessagesLoading: boolean;
   lastInteraction: Record<string, number>;
+  unreadCounts: Record<string, number>;
   pagination: PaginationInfo | null;
   getConversationIdForSelected: () => string | null;
   getUsers: () => Promise<void>;
   getMessages: (userId: string, loadMore?: boolean) => Promise<void>;
   sendMessage: (messageData: ChatMessageInput) => Promise<void>;
+  subscribeToGlobalMessages: () => void;
+  unsubscribeFromGlobalMessages: () => void;
   subscribeToMessages: () => void;
   unsubscribeFromMessages: () => void;
   setSelectedUser: (selectedUser: User | null) => void;
@@ -57,6 +62,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isUsersLoading: false,
   isMessagesLoading: false,
   lastInteraction: {},
+  unreadCounts: {},
   pagination: null,
 
   getConversationIdForSelected: () => {
@@ -70,7 +76,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isUsersLoading: true });
     try {
       const res = await axiosInstance.get<User[]>(API_ROUTES.messages.getUsers);
-      set({ users: sortUsersByLastInteraction(res.data, get().lastInteraction) });
+      const visibleUsers = res.data.filter((user) => user.email !== META_EMAIL && user.fullName.toLowerCase() !== "metaai");
+      const authUser = useAuthStore.getState().authUser;
+      const unreadCounts = { ...get().unreadCounts };
+      const lastInteraction = { ...get().lastInteraction };
+
+      visibleUsers.forEach((user) => {
+        const lastMessageAt = user.lastMessage?.createdAt ? new Date(user.lastMessage.createdAt).getTime() : 0;
+        if (lastMessageAt) {
+          lastInteraction[user._id] = lastMessageAt;
+        }
+        const lastReadAt = user.lastRead ? new Date(user.lastRead).getTime() : 0;
+        const isUnread = Boolean(
+          authUser?._id &&
+          user.lastMessage?.senderId &&
+          user.lastMessage.senderId !== authUser._id &&
+          lastMessageAt > lastReadAt
+        );
+        unreadCounts[user._id] = isUnread ? Math.max(1, unreadCounts[user._id] ?? 0) : unreadCounts[user._id] ?? 0;
+      });
+
+      set({
+        users: sortUsersByLastInteraction(visibleUsers, lastInteraction),
+        lastInteraction,
+        unreadCounts,
+      });
     } catch {
       toast.error("Failed to load users");
     } finally {
@@ -112,6 +142,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set((state) => ({
             lastInteraction: { ...state.lastInteraction, [userId]: lastInteraction },
             users: sortUsersByLastInteraction(state.users, { ...state.lastInteraction, [userId]: lastInteraction }),
+            unreadCounts: { ...state.unreadCounts, [userId]: 0 },
           }));
         }
       }
@@ -135,10 +166,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         lastInteraction: { ...state.lastInteraction, [selectedUser._id]: timestamp },
         users: sortUsersByLastInteraction(state.users, { ...state.lastInteraction, [selectedUser._id]: timestamp }),
+        unreadCounts: { ...state.unreadCounts, [selectedUser._id]: 0 },
       }));
     } catch {
       toast.error("Failed to send message");
     }
+  },
+
+  subscribeToGlobalMessages: () => {
+    const socket = useAuthStore.getState().socket;
+    const authUser = useAuthStore.getState().authUser;
+    if (!socket || !authUser?._id) return;
+
+    socket.on(SOCKET_EVENTS.newMessage, (newMessage: Message) => {
+      const senderId = typeof newMessage.senderId === "object" ? newMessage.senderId._id : newMessage.senderId;
+      const conversationId = newMessage.conversationId;
+      const selectedUser = get().selectedUser;
+      const activeConversationId =
+        selectedUser && authUser?._id ? getConversationId(authUser._id, selectedUser._id) : null;
+
+      if (senderId === authUser._id) return;
+      const timestamp = new Date(newMessage.createdAt).getTime();
+
+      if (conversationId && activeConversationId && conversationId === activeConversationId) {
+        set((state) => ({
+          messages: mergeUniqueMessages(state.messages, [newMessage]),
+          lastInteraction: { ...state.lastInteraction, [selectedUser._id]: timestamp },
+          users: sortUsersByLastInteraction(state.users, { ...state.lastInteraction, [selectedUser._id]: timestamp }),
+          unreadCounts: { ...state.unreadCounts, [selectedUser._id]: 0 },
+        }));
+        return;
+      }
+
+      set((state) => ({
+        unreadCounts: {
+          ...state.unreadCounts,
+          [senderId]: (state.unreadCounts[senderId] ?? 0) + 1,
+        },
+        lastInteraction: {
+          ...state.lastInteraction,
+          [senderId]: timestamp,
+        },
+        users: sortUsersByLastInteraction(state.users, {
+          ...state.lastInteraction,
+          [senderId]: timestamp,
+        }),
+      }));
+    });
+  },
+
+  unsubscribeFromGlobalMessages: () => {
+    useAuthStore.getState().socket?.off(SOCKET_EVENTS.newMessage);
   },
 
   subscribeToMessages: () => {
@@ -160,6 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         lastInteraction: { ...state.lastInteraction, [selectedUser._id]: timestamp },
         users: sortUsersByLastInteraction(state.users, { ...state.lastInteraction, [selectedUser._id]: timestamp }),
+        unreadCounts: { ...state.unreadCounts, [selectedUser._id]: 0 },
       }));
     });
   },
@@ -168,5 +247,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     useAuthStore.getState().socket?.off(SOCKET_EVENTS.newMessage);
   },
 
-  setSelectedUser: (selectedUser) => set({ selectedUser, messages: [], pagination: null }),
+  setSelectedUser: (selectedUser) =>
+    set((state) => ({
+      selectedUser,
+      messages: [],
+      pagination: null,
+      unreadCounts: selectedUser ? { ...state.unreadCounts, [selectedUser._id]: 0 } : state.unreadCounts,
+    })),
 }));

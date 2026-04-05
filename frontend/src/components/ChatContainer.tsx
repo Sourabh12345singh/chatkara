@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useChatStore } from "../store/useChatStore";
 import { useAuthStore } from "../store/useAuthStore";
 import ChatHeader from "./ChatHeader";
@@ -12,23 +12,42 @@ const ChatContainer = () => {
     getMessages,
     isMessagesLoading,
     selectedUser,
-    subscribeToMessages,
-    unsubscribeFromMessages,
     pagination,
   } =
     useChatStore();
   const { authUser } = useAuthStore();
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingMoreRef = useRef(false);
+  const prevScrollHeightRef = useRef(0);
+  const prevScrollTopRef = useRef(0);
+  const pendingScrollAdjustRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
     if (!selectedUser) return;
     void getMessages(selectedUser._id);
-    subscribeToMessages();
-    return () => unsubscribeFromMessages();
-  }, [selectedUser, getMessages, subscribeToMessages, unsubscribeFromMessages]);
+  }, [selectedUser, getMessages]);
 
   useEffect(() => {
+    if (pendingScrollAdjustRef.current) return;
+    if (!shouldAutoScrollRef.current) return;
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isMessagesLoading) {
+      isLoadingMoreRef.current = false;
+    }
+  }, [isMessagesLoading]);
+
+  useLayoutEffect(() => {
+    if (!pendingScrollAdjustRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const newScrollTop = container.scrollHeight - prevScrollHeightRef.current + prevScrollTopRef.current;
+    container.scrollTop = newScrollTop;
+    pendingScrollAdjustRef.current = false;
   }, [messages]);
 
   if (isMessagesLoading) {
@@ -44,21 +63,30 @@ const ChatContainer = () => {
   return (
     <div className="flex flex-1 flex-col overflow-auto">
       <ChatHeader />
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        {pagination?.hasMore && selectedUser && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              disabled={isMessagesLoading}
-              onClick={() => void getMessages(selectedUser._id, true)}
-            >
-              Load more
-            </button>
-          </div>
-        )}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 space-y-4 overflow-y-auto p-4"
+        onScroll={(e) => {
+          if (!pagination?.hasMore || !selectedUser) return;
+          if (isMessagesLoading || isLoadingMoreRef.current) return;
+          const target = e.currentTarget;
+          const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 40;
+          shouldAutoScrollRef.current = atBottom;
+          if (target.scrollTop <= 0) {
+            isLoadingMoreRef.current = true;
+            prevScrollHeightRef.current = target.scrollHeight;
+            prevScrollTopRef.current = target.scrollTop;
+            pendingScrollAdjustRef.current = true;
+            void getMessages(selectedUser._id, true);
+          }
+        }}
+      >
         {messages.map((message, index) => {
-          const isMe = authUser && message.senderId === authUser._id;
+          const senderId =
+            typeof message.senderId === "object" && message.senderId
+              ? message.senderId._id
+              : message.senderId;
+          const isMe = Boolean(authUser && senderId === authUser._id);
           const senderName =
             typeof message.senderId === "object" && "fullName" in message.senderId
               ? String(message.senderId.fullName)

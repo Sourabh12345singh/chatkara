@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { connectDB } from "./lib/db";
 import authRoutes from "./routes/auth.route";
 import messageRoutes from "./routes/message.route";
+import groupRoutes from "./routes/group.route";
 import googleAuthRoutes from "./routes/google-auth.route";
 import { app, server } from "./lib/socket";
 
@@ -65,7 +66,8 @@ app.use(passport.session());
 // ============================================
 app.use("/api/auth", authRoutes);         // Regular auth (signup, login, logout)
 app.use("/api/auth", googleAuthRoutes);   // Google OAuth routes
-app.use("/api/messages", messageRoutes); // Messages API
+app.use("/api/messages", messageRoutes);   // 1-on-1 Messages API
+app.use("/api/groups", groupRoutes);      // Group Chat API
 
 // ============================================
 // PRODUCTION STATIC FILES
@@ -80,7 +82,7 @@ if (process.env.NODE_ENV === "production") {
 // ============================================
 // START SERVER
 // ============================================
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   void connectDB();
   console.log(`Server running on port ${port}`);
 });

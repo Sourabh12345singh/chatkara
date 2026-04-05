@@ -4,10 +4,11 @@ export const ROUTES = {
   signup: "/signup",
   settings: "/settings",
   profile: "/profile",
+  groups: "/groups",
   chat: (userId: string) => `/chat/${userId}`,
+  groupChat: (groupId: string) => `/groups/${groupId}`,
 } as const;
 
-// NOTE: baseURL already includes /api, so routes here are relative to /api
 export const API_ROUTES = {
   auth: {
     signup: "/auth/signup",
@@ -15,9 +16,6 @@ export const API_ROUTES = {
     logout: "/auth/logout",
     updateProfile: "/auth/update-profile",
     checkAuth: "/auth/check",
-    // ============================================
-    // GOOGLE OAUTH ROUTES
-    // ============================================
     google: "/auth/google",
     googleCallback: "/auth/google/callback",
   },
@@ -26,9 +24,25 @@ export const API_ROUTES = {
     getMessages: (userId: string) => `/messages/${userId}`,
     sendMessage: (userId: string) => `/messages/send/${userId}`,
   },
+  groups: {
+    create: "/groups",
+    getAll: "/groups",
+    getMessages: (groupId: string) => `/groups/${groupId}/messages`,
+    sendMessage: (groupId: string) => `/groups/${groupId}/messages`,
+    update: (groupId: string) => `/groups/${groupId}`,
+    addMembers: (groupId: string) => `/groups/${groupId}/members`,
+    removeMember: (groupId: string, userId: string) => `/groups/${groupId}/members/${userId}`,
+    leave: (groupId: string) => `/groups/${groupId}/leave`,
+    delete: (groupId: string) => `/groups/${groupId}`,
+  },
 } as const;
 
 export const SOCKET_EVENTS = {
   getOnlineUsers: "getOnlineUsers",
   newMessage: "newMessage",
+  newGroupMessage: "newGroupMessage",
+  groupCreated: "groupCreated",
+  groupUpdated: "groupUpdated",
+  groupDeleted: "groupDeleted",
+  removedFromGroup: "removedFromGroup",
 } as const;

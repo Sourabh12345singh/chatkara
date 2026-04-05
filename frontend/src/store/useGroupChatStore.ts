@@ -17,7 +17,7 @@ type GroupState = {
   isGroupsLoading: boolean;
   isGroupMessagesLoading: boolean;
   getGroups: () => Promise<void>;
-  createGroup: (groupData: { name: string }) => Promise<void>;
+  createGroup: (groupData: { name: string; members: string[]; groupPic?: string }) => Promise<void>;
   getGroupMessages: (groupId: string) => Promise<void>;
   sendGroupMessage: (messageData: { text?: string; image?: string }) => Promise<void>;
   subscribeToGroupMessages: () => void;
@@ -50,7 +50,7 @@ export const useGroupChatStore = create<GroupState>((set, get) => ({
 
   createGroup: async (groupData) => {
     try {
-      const res = await axiosInstance.post<Group>("/groups/create", groupData);
+      const res = await axiosInstance.post<Group>("/groups", groupData);
       set({ groups: [...get().groups, res.data] });
       toast.success("Group created successfully");
     } catch {
@@ -74,7 +74,7 @@ export const useGroupChatStore = create<GroupState>((set, get) => ({
     const { selectedGroup, groupMessages } = get();
     if (!selectedGroup) return;
     try {
-      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/send`, messageData);
+      const res = await axiosInstance.post(`/groups/${selectedGroup._id}/messages`, messageData);
       set({ groupMessages: [...groupMessages, res.data] });
     } catch {
       toast.error("Failed to send group message");

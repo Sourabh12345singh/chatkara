@@ -21,6 +21,7 @@ export const API_ROUTES = {
   },
   messages: {
     getUsers: "/messages/users",
+    getUnreadCounts: "/messages/unread-counts",
     getMessages: (userId: string) => `/messages/${userId}`,
     sendMessage: (userId: string) => `/messages/send/${userId}`,
   },

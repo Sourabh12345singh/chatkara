@@ -61,6 +61,42 @@ export const getUsersForSidebar = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
+export const getUnreadCounts = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const loggedInUserId = req.user?._id;
+    if (!loggedInUserId) return res.status(401).json({ message: "Unauthorized request" });
+
+    const conversations = await Conversation.find({ participants: loggedInUserId }).select("conversationId participants lastRead lastMessage");
+    const userIdString = loggedInUserId.toString();
+
+    const counts = await Promise.all(
+      conversations.map(async (conv) => {
+        const otherId = conv.participants.find((id) => id.toString() !== userIdString);
+        if (!otherId) return null;
+
+        const lastReadAt = conv.lastRead?.get(userIdString) ?? new Date(0);
+        const unread = await Message.countDocuments({
+          conversationId: conv.conversationId,
+          senderId: { $ne: loggedInUserId },
+          createdAt: { $gt: lastReadAt },
+        });
+
+        return { userId: otherId.toString(), count: unread };
+      })
+    );
+
+    const result: Record<string, number> = {};
+    counts.forEach((entry) => {
+      if (!entry) return;
+      result[entry.userId] = entry.count;
+    });
+
+    res.status(200).json(result);
+  } catch {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id: userToChatId } = req.params;

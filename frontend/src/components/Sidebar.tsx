@@ -7,7 +7,7 @@ import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading, unreadCounts, subscribeToGlobalMessages, unsubscribeFromGlobalMessages } = useChatStore();
+  const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading, unreadCounts, subscribeToGlobalMessages, unsubscribeFromGlobalMessages, refreshUnreadCounts } = useChatStore();
   const { onlineUsers, authUser } = useAuthStore();
   const [showOnlineOnly, setShowOnlineOnly] = useState(false);
   const hasFetchedInitialData = useRef(false);
@@ -22,6 +22,14 @@ const Sidebar = () => {
     subscribeToGlobalMessages();
     return () => unsubscribeFromGlobalMessages();
   }, [subscribeToGlobalMessages, unsubscribeFromGlobalMessages]);
+
+  useEffect(() => {
+    void refreshUnreadCounts();
+    const interval = setInterval(() => {
+      void refreshUnreadCounts();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [refreshUnreadCounts]);
 
   const filteredUsers = showOnlineOnly ? users.filter((user) => onlineUsers.includes(user._id)) : users;
   if (isUsersLoading) return <SidebarSkeleton />;
@@ -47,14 +55,7 @@ const Sidebar = () => {
       </div>
       <div className="w-full overflow-y-auto py-3">
         {filteredUsers.map((item) => {
-          const lastMessageAt = item.lastMessage?.createdAt ? new Date(item.lastMessage.createdAt).getTime() : 0;
-          const lastReadAt = item.lastRead ? new Date(item.lastRead).getTime() : 0;
-          const isUnread = Boolean(
-            authUser?._id &&
-            item.lastMessage?.senderId &&
-            item.lastMessage.senderId !== authUser._id &&
-            lastMessageAt > lastReadAt
-          );
+          const hasUnread = (unreadCounts[item._id] ?? 0) > 0;
           return (
           <button
             key={item._id}
@@ -63,8 +64,8 @@ const Sidebar = () => {
             className={`w-full flex items-center gap-3 rounded-lg p-3 transition-colors hover:bg-base-300 ${
               selectedUser?._id === item._id
                 ? "bg-base-300 ring-1 ring-base-300"
-                : isUnread
-                  ? "bg-blue-100"
+                : hasUnread
+                  ? "bg-primary/10 ring-1 ring-primary/30"
                   : "bg-transparent"
             }`}
           >

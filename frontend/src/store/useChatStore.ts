@@ -41,13 +41,14 @@ type ChatState = {
   selectedUser: User | null;
   isUsersLoading: boolean;
   isMessagesLoading: boolean;
-  lastInteraction: Record<string, number>;
+  lastInteraction: Record<string, number>; 
   unreadCounts: Record<string, number>;
   pagination: PaginationInfo | null;
   getConversationIdForSelected: () => string | null;
   getUsers: () => Promise<void>;
   getMessages: (userId: string, loadMore?: boolean) => Promise<void>;
   sendMessage: (messageData: ChatMessageInput) => Promise<void>;
+  refreshUnreadCounts: () => Promise<void>;
   subscribeToGlobalMessages: () => void;
   unsubscribeFromGlobalMessages: () => void;
   subscribeToMessages: () => void;
@@ -76,9 +77,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isUsersLoading: true });
     try {
       const res = await axiosInstance.get<User[]>(API_ROUTES.messages.getUsers);
+      const unreadRes = await axiosInstance.get<Record<string, number>>(API_ROUTES.messages.getUnreadCounts);
       const visibleUsers = res.data.filter((user) => user.email !== META_EMAIL && user.fullName.toLowerCase() !== "metaai");
       const authUser = useAuthStore.getState().authUser;
-      const unreadCounts = { ...get().unreadCounts };
+      const unreadCounts: Record<string, number> = {};
+      visibleUsers.forEach((user) => {
+        unreadCounts[user._id] = unreadRes.data[user._id] ?? get().unreadCounts[user._id] ?? 0;
+      });
       const lastInteraction = { ...get().lastInteraction };
 
       visibleUsers.forEach((user) => {
@@ -173,6 +178,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  refreshUnreadCounts: async () => {
+    try {
+      const res = await axiosInstance.get<Record<string, number>>(API_ROUTES.messages.getUnreadCounts);
+      set((state) => {
+        const next: Record<string, number> = {};
+        state.users.forEach((user) => {
+          next[user._id] = res.data[user._id] ?? 0;
+        });
+        return { unreadCounts: next };
+      });
+    } catch {
+      // Silent fail to avoid noisy UI
+    }
+  },
+
   subscribeToGlobalMessages: () => {
     const socket = useAuthStore.getState().socket;
     const authUser = useAuthStore.getState().authUser;
@@ -215,6 +235,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [senderId]: timestamp,
         }),
       }));
+
+      void get().refreshUnreadCounts();
     });
   },
 

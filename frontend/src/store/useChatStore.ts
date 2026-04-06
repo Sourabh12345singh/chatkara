@@ -198,6 +198,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
+      
+      // console.log("line 202 - ", newMessage);
+
       set((state) => ({
         unreadCounts: {
           ...state.unreadCounts,
@@ -232,6 +235,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? newMessage.conversationId === activeConversationId
         : senderId === selectedUser._id;
       if (!sameConversation) return;
+
+      // console.log('aaja mere raja  ');
       
       set({ messages: mergeUniqueMessages(get().messages, [newMessage]) });
       const timestamp = new Date(newMessage.createdAt).getTime();

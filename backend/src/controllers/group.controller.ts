@@ -4,6 +4,7 @@ import Group from "../models/group.model";
 import Message from "../models/message.model";
 import User from "../models/user.model";
 import { io } from "../lib/socket";
+import cloudinary from "../lib/cloudinary";
 import type { AuthenticatedRequest } from "../types";
 import {
   ensureMetaUser,
@@ -20,6 +21,11 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
       members?: string[];
       groupPic?: string;
     };
+    const hasCloudinaryConfig = Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
 
     const adminId = req.user?._id;
 
@@ -64,10 +70,19 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
       ...new Set([adminId.toString(), ...validMemberIds]),
     ];
 
+    let groupPicUrl = "";
+    if (groupPic) {
+      if (!hasCloudinaryConfig) {
+        return res.status(500).json({ message: "Cloudinary is not configured" });
+      }
+      const uploadResult = await cloudinary.uploader.upload(groupPic, { folder: "group_pics" });
+      groupPicUrl = uploadResult.secure_url;
+    }
+
     //  Create group
     const group = await Group.create({
       name: name.trim(),
-      groupPic: groupPic || "",
+      groupPic: groupPicUrl,
       admin: adminId,
       members: allMembers,
     });
@@ -188,6 +203,11 @@ export const sendGroupMessage = async (req: AuthenticatedRequest, res: Response)
     const { groupId } = req.params;
     const senderId = req.user?._id;
     const { text, image } = req.body as { text?: string; image?: string };
+    const hasCloudinaryConfig = Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
 
     if (!senderId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -200,11 +220,20 @@ export const sendGroupMessage = async (req: AuthenticatedRequest, res: Response)
 
     const intent = typeof text === "string" ? extractMetaIntent(text) : null;
 
+    let imageUrl = "";
+    if (image) {
+      if (!hasCloudinaryConfig) {
+        return res.status(500).json({ message: "Cloudinary is not configured" });
+      }
+      const uploadResult = await cloudinary.uploader.upload(image, { folder: "message_images" });
+      imageUrl = uploadResult.secure_url;
+    }
+
     const newMessage = await Message.create({
       senderId,
       groupId,
       text: text ?? "",
-      image: image ?? "",
+      image: imageUrl,
     });
 
     const populatedMessage = await Message.findById(newMessage._id).populate("senderId", "fullName profilePic");
@@ -273,6 +302,11 @@ export const updateGroup = async (req: AuthenticatedRequest, res: Response) => {
     const { groupId } = req.params;
     const adminId = req.user?._id;
     const { name, groupPic } = req.body as { name?: string; groupPic?: string };
+    const hasCloudinaryConfig = Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
 
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -284,7 +318,13 @@ export const updateGroup = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     if (name) group.name = name;
-    if (groupPic) group.groupPic = groupPic;
+    if (groupPic) {
+      if (!hasCloudinaryConfig) {
+        return res.status(500).json({ message: "Cloudinary is not configured" });
+      }
+      const uploadResult = await cloudinary.uploader.upload(groupPic, { folder: "group_pics" });
+      group.groupPic = uploadResult.secure_url;
+    }
 
     await group.save();
     const updatedGroup = await Group.findById(groupId)

@@ -3,6 +3,7 @@ import Message from "../models/message.model";
 import Conversation from "../models/conversation.model";
 import User from "../models/user.model";
 import { getReceiverSocketId, io } from "../lib/socket";
+import cloudinary from "../lib/cloudinary";
 import type { AuthenticatedRequest } from "../types";
 import {
   ensureMetaUser,
@@ -150,9 +151,23 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     const { id: receiverId } = req.params;
     const senderId = req.user?._id;
     const { text, image } = req.body as { text?: string; image?: string };
+    const hasCloudinaryConfig = Boolean(
+      process.env.CLOUDINARY_CLOUD_NAME &&
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET
+    );
 
     if (!senderId || !receiverId || Array.isArray(receiverId)) {
       return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    let imageUrl = "";
+    if (image) {
+      if (!hasCloudinaryConfig) {
+        return res.status(500).json({ message: "Cloudinary is not configured" });
+      }
+      const uploadResult = await cloudinary.uploader.upload(image, { folder: "message_images" });
+      imageUrl = uploadResult.secure_url;
     }
 
     // Generate conversation ID
@@ -165,7 +180,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       receiverId,
       conversationId,
       text: text ?? "",
-      image: image ?? "",
+      image: imageUrl,
     });
 
     const now = new Date();

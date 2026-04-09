@@ -52,9 +52,11 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response) =>
       Boolean(process.env.CLOUDINARY_API_KEY) &&
       Boolean(process.env.CLOUDINARY_API_SECRET);
 
-    const profilePicUrl = hasCloudinaryConfig
-      ? (await cloudinary.uploader.upload(profilePic, { folder: "profile_pics" })).secure_url
-      : profilePic;
+    if (!hasCloudinaryConfig) {
+      return res.status(500).json({ message: "Cloudinary is not configured" });
+    }
+
+    const profilePicUrl = (await cloudinary.uploader.upload(profilePic, { folder: "profile_pics" })).secure_url;
 
     const updatedUser = await User.findByIdAndUpdate(req.user._id, { profilePic: profilePicUrl }, { new: true });
     res.status(200).json(updatedUser);

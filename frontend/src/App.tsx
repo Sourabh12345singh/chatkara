@@ -8,8 +8,7 @@ import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
 import ProfilePage from "./pages/ProfilePage";
-import GroupsPage from "./pages/GroupsPage";
-import GroupChatPage from "./pages/GroupChatPage";
+import GroupPage from "./pages/GroupPage";
 import { useAuthStore } from "./store/useAuthStore";
 import { useThemeStore } from "./store/useThemeStore";
 
@@ -38,8 +37,8 @@ const App = () => {
         <Route path="/login" element={!authUser ? <LoginPage /> : <Navigate to="/" />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/profile" element={authUser ? <ProfilePage /> : <Navigate to="/login" />} />
-        <Route path="/groups" element={authUser ? <GroupsPage /> : <Navigate to="/login" />} />
-        <Route path="/groups/:groupId" element={authUser ? <GroupChatPage /> : <Navigate to="/login" />} />
+        <Route path="/groups" element={authUser ? <GroupPage /> : <Navigate to="/login" />} />
+        <Route path="/groups/:groupId" element={authUser ? <GroupPage /> : <Navigate to="/login" />} />
       </Routes>
       <Toaster />
     </div>

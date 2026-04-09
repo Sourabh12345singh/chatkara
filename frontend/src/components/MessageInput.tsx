@@ -3,7 +3,12 @@ import { Image, Send, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { useChatStore } from "../store/useChatStore";
 
-const MessageInput = () => {
+type MessageInputProps = {
+  onSend?: (payload: { text: string; image?: string | null }) => Promise<void> | void;
+  placeholder?: string;
+};
+
+const MessageInput = ({ onSend, placeholder = "Type a message..." }: MessageInputProps) => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -31,10 +36,16 @@ const MessageInput = () => {
     e.preventDefault();
     if (!text.trim() && !imagePreview) return;
 
-    await sendMessage({ text: text.trim(), image: imagePreview });
+    const payload = { text: text.trim(), image: imagePreview };
     setText("");
     setImagePreview(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (onSend) {
+      await onSend(payload);
+    } else {
+      await sendMessage(payload);
+    }
   };
 
   return (
@@ -58,7 +69,7 @@ const MessageInput = () => {
           <input
             type="text"
             className="input input-bordered input-sm w-full rounded-lg sm:input-md"
-            placeholder="Type a message..."
+            placeholder={placeholder}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />

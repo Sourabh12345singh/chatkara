@@ -20,6 +20,19 @@ const mergeUniqueMessages = (existing: Message[], incoming: Message[]) => {
   return merged;
 };
 
+const isLikelySameOptimistic = (optimistic: Message, actual: Message) => {
+  if (!optimistic._id.startsWith("temp-")) return false;
+  const optimisticSender =
+    typeof optimistic.senderId === "object" ? optimistic.senderId._id : optimistic.senderId;
+  const actualSender = typeof actual.senderId === "object" ? actual.senderId._id : actual.senderId;
+  if (!optimisticSender || !actualSender || optimisticSender !== actualSender) return false;
+  if ((optimistic.text ?? "") !== (actual.text ?? "")) return false;
+  if ((optimistic.image ?? "") !== (actual.image ?? "")) return false;
+  const optimisticTime = new Date(optimistic.createdAt).getTime();
+  const actualTime = new Date(actual.createdAt).getTime();
+  return Math.abs(actualTime - optimisticTime) < 10000;
+};
+
 const getConversationId = (userId1: string, userId2: string) => {
   const sorted = [userId1, userId2].sort();
   return `conv_${sorted[0]}_${sorted[1]}`;
@@ -162,10 +175,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { selectedUser, messages } = get();
     if (!selectedUser) return;
     try {
+      const authUser = useAuthStore.getState().authUser;
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const optimisticMessage: Message = {
+        _id: tempId,
+        senderId: authUser
+          ? { _id: authUser._id, fullName: authUser.fullName, profilePic: authUser.profilePic }
+          : "",
+        receiverId: selectedUser._id,
+        conversationId: authUser?._id ? getConversationId(authUser._id, selectedUser._id) : undefined,
+        text: messageData.text ?? "",
+        image: messageData.image ?? "",
+        createdAt: new Date().toISOString(),
+      };
+
+      set({ messages: mergeUniqueMessages(messages, [optimisticMessage]) });
+
       const res = await axiosInstance.post<Message>(API_ROUTES.messages.sendMessage(selectedUser._id), messageData);
       
-      // Add new message at the end (most recent)
-      set({ messages: mergeUniqueMessages(messages, [res.data]) });
+      set((state) => {
+        const withoutDupTemp = state.messages.filter(
+          (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, res.data))
+        );
+        return { messages: mergeUniqueMessages(withoutDupTemp, [res.data]) };
+      });
       
       const timestamp = new Date(res.data.createdAt).getTime();
       set((state) => ({
@@ -174,6 +207,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         unreadCounts: { ...state.unreadCounts, [selectedUser._id]: 0 },
       }));
     } catch {
+      const authUserId = useAuthStore.getState().authUser?._id;
+      set((state) => ({
+        messages: state.messages.filter((msg) => {
+          if (!msg._id.startsWith("temp-")) return true;
+          const senderId = typeof msg.senderId === "object" ? msg.senderId._id : msg.senderId;
+          return senderId !== authUserId;
+        }),
+      }));
       toast.error("Failed to send message");
     }
   },
@@ -205,7 +246,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const activeConversationId =
         selectedUser && authUser?._id ? getConversationId(authUser._id, selectedUser._id) : null;
 
-      if (senderId === authUser._id) return;
+      if (senderId === authUser._id) {
+        const withoutDupTemp = get().messages.filter(
+          (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, newMessage))
+        );
+        set({ messages: mergeUniqueMessages(withoutDupTemp, [newMessage]) });
+        return;
+      }
       const timestamp = new Date(newMessage.createdAt).getTime();
 
       if (conversationId && activeConversationId && conversationId === activeConversationId) {
@@ -258,9 +305,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : senderId === selectedUser._id;
       if (!sameConversation) return;
 
-      // console.log('aaja mere raja  ');
-      
-      set({ messages: mergeUniqueMessages(get().messages, [newMessage]) });
+      const withoutDupTemp = get().messages.filter(
+        (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, newMessage))
+      );
+      set({ messages: mergeUniqueMessages(withoutDupTemp, [newMessage]) });
       const timestamp = new Date(newMessage.createdAt).getTime();
       set((state) => ({
         lastInteraction: { ...state.lastInteraction, [selectedUser._id]: timestamp },

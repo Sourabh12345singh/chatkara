@@ -16,6 +16,20 @@ const mergeUniqueMessages = (existing: Message[], incoming: Message[]) => {
   return merged;
 };
 
+const isLikelySameOptimistic = (optimistic: Message, actual: Message) => {
+  if (!optimistic._id.startsWith("temp-")) return false;
+  const optimisticSender =
+    typeof optimistic.senderId === "object" ? optimistic.senderId._id : optimistic.senderId;
+  const actualSender =
+    typeof actual.senderId === "object" ? actual.senderId._id : actual.senderId;
+  if (!optimisticSender || !actualSender || optimisticSender !== actualSender) return false;
+  if ((optimistic.text ?? "") !== (actual.text ?? "")) return false;
+  if ((optimistic.image ?? "") !== (actual.image ?? "")) return false;
+  const optimisticTime = new Date(optimistic.createdAt).getTime();
+  const actualTime = new Date(actual.createdAt).getTime();
+  return Math.abs(actualTime - optimisticTime) < 10000;
+};
+
 type PaginationInfo = {
   page: number;
   limit: number;
@@ -127,13 +141,46 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
   },
 
+
+  //why api calling...whynot not socket
   sendGroupMessage: async (messageData) => {
     const { selectedGroup, groupMessages } = get();
     if (!selectedGroup) return;
     try {
+      const authUser = useAuthStore.getState().authUser;
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const optimisticMessage: Message = {
+        _id: tempId,
+        senderId: authUser
+          ? { _id: authUser._id, fullName: authUser.fullName, profilePic: authUser.profilePic }
+          : "",
+        groupId: selectedGroup._id,
+        text: messageData.text ?? "",
+        image: messageData.image ?? "",
+        createdAt: new Date().toISOString(),
+      };
+
+      set({ groupMessages: mergeUniqueMessages(groupMessages, [optimisticMessage]) });
+
       const res = await axiosInstance.post<Message>(`/groups/${selectedGroup._id}/messages`, messageData);
-      set({ groupMessages: mergeUniqueMessages(groupMessages, [res.data]) });
+      set((state) => {
+        const withoutDupTemp = state.groupMessages.filter(
+          (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, res.data))
+        );
+        return {
+          groupMessages: mergeUniqueMessages(withoutDupTemp, [res.data]),
+        };
+      });
     } catch {
+      const authUserId = useAuthStore.getState().authUser?._id;
+      set((state) => ({
+        groupMessages: state.groupMessages.filter((msg) => {
+          if (!msg._id.startsWith("temp-")) return true;
+          if (msg.groupId !== selectedGroup._id) return true;
+          const senderId = typeof msg.senderId === "object" ? msg.senderId._id : msg.senderId;
+          return senderId !== authUserId;
+        }),
+      }));
       toast.error("Failed to send message");
     }
   },
@@ -227,7 +274,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     socket.on(SOCKET_EVENTS.newGroupMessage, (message: Message) => {
       const { selectedGroup, groupMessages } = get();
       if (selectedGroup?._id === message.groupId) {
-        set({ groupMessages: mergeUniqueMessages(groupMessages, [message]) });
+        const withoutDupTemp = groupMessages.filter(
+          (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, message))
+        );
+        set({ groupMessages: mergeUniqueMessages(withoutDupTemp, [message]) });
       }
     });
 

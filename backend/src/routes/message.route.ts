@@ -1,6 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import { protectRoute } from "../middleware/auth.middleware";
-import { getMessages, getUnreadCounts, getUsersForSidebar, sendMessage } from "../controllers/message.controller";
+import {
+  getMessages,
+  getUnreadCounts,
+  getUsersForSidebar,
+  markConversationRead,
+  sendMessage,
+} from "../controllers/message.controller";
 
 const router = Router();
 
@@ -8,6 +14,8 @@ const router = Router();
 router.get("/users", protectRoute, getUsersForSidebar);
 // @ts-ignore
 router.get("/unread-counts", protectRoute, getUnreadCounts);
+// @ts-ignore
+router.post("/read/:id", protectRoute, markConversationRead);
 // @ts-ignore
 router.get("/:id", protectRoute, getMessages);
 // @ts-ignore

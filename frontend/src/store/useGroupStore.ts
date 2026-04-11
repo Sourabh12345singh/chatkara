@@ -41,7 +41,9 @@ type PaginationInfo = {
 type GroupState = {
   groups: Group[];
   selectedGroup: Group | null;
+  activeGroupId: string | null;
   groupMessages: Message[];
+  unreadCounts: Record<string, number>;
   isGroupsLoading: boolean;
   isMessagesLoading: boolean;
   isCreatingGroup: boolean;
@@ -58,12 +60,16 @@ type GroupState = {
   deleteGroup: (groupId: string) => Promise<void>;
   setSelectedGroup: (group: Group | null) => void;
   setupSocketListeners: () => void;
+  refreshGroupUnreadCounts: () => Promise<void>;
+  markGroupAsRead: (groupId: string) => Promise<void>;
 };
 
 export const useGroupStore = create<GroupState>((set, get) => ({
   groups: [],
   selectedGroup: null,
+  activeGroupId: null,
   groupMessages: [],
+  unreadCounts: {},
   isGroupsLoading: false,
   isMessagesLoading: false,
   isCreatingGroup: false,
@@ -73,7 +79,11 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   getGroups: async () => {
     set({ isGroupsLoading: true });
     try {
-      const res = await axiosInstance.get<Group[]>("/groups");
+      const [groupsRes, unreadRes] = await Promise.all([
+        axiosInstance.get<Group[]>("/groups"),
+        axiosInstance.get<Record<string, number>>("/groups/unread-counts"),
+      ]);
+      const res = groupsRes;
       const sorted = [...res.data].sort((a, b) => {
         const aTime = typeof a.lastMessage === "object" && a.lastMessage?.createdAt
           ? new Date(a.lastMessage.createdAt).getTime()
@@ -83,7 +93,11 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           : 0;
         return bTime - aTime;
       });
-      set({ groups: sorted });
+      const unreadCounts: Record<string, number> = {};
+      sorted.forEach((group) => {
+        unreadCounts[group._id] = unreadRes.data[group._id] ?? get().unreadCounts[group._id] ?? 0;
+      });
+      set({ groups: sorted, unreadCounts });
     } catch {
       toast.error("Failed to load groups");
     } finally {
@@ -95,7 +109,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     set({ isCreatingGroup: true });
     try {
       const res = await axiosInstance.post<Group>("/groups", data);
-      set({ groups: [res.data, ...get().groups] });
+      set((state) => ({
+        groups: [res.data, ...state.groups],
+        unreadCounts: { ...state.unreadCounts, [res.data._id]: 0 },
+      }));
       toast.success("Group created successfully");
     } catch {
       toast.error("Failed to create group");
@@ -112,12 +129,57 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
     set({ isMessagesLoading: true });
     try {
-      // Fetch single group
-      const groupRes = await axiosInstance.get<Group>(`/groups/${groupId}`);
-      set({ selectedGroup: groupRes.data });
+      if (!loadMore) {
+        set({ activeGroupId: groupId });
+        const cachedGroup = get().groups.find((group) => group._id === groupId) ?? null;
+        if (cachedGroup) {
+          set({ selectedGroup: cachedGroup });
+        }
 
-      // Fetch messages with pagination
-      const page = loadMore ? (get().groupPagination?.page ?? 1) + 1 : 1;
+        // Fast path: load only latest 10 first for instant paint
+        const fastRes = await axiosInstance.get<{ messages: Message[]; pagination: PaginationInfo }>(
+          `/groups/${groupId}/messages`,
+          { params: { page: 1, limit: 10 } }
+        );
+
+        const fastMessages = [...fastRes.data.messages].reverse();
+        set({
+          groupMessages: fastMessages,
+          groupPagination: fastRes.data.pagination,
+          unreadCounts: { ...get().unreadCounts, [groupId]: 0 },
+          isMessagesLoading: false,
+        });
+        void get().markGroupAsRead(groupId);
+
+        // Background hydration: expand to 30 + refresh full group details
+        void (async () => {
+          try {
+            const [fullMessagesRes, groupRes] = await Promise.all([
+              axiosInstance.get<{ messages: Message[]; pagination: PaginationInfo }>(`/groups/${groupId}/messages`, {
+                params: { page: 1, limit: 30 },
+              }),
+              axiosInstance.get<Group>(`/groups/${groupId}`),
+            ]);
+
+            const isStillSameGroup = get().activeGroupId === groupId;
+            if (!isStillSameGroup) return;
+
+            const fullMessages = [...fullMessagesRes.data.messages].reverse();
+            set({
+              selectedGroup: groupRes.data,
+              groupMessages: fullMessages,
+              groupPagination: fullMessagesRes.data.pagination,
+            });
+          } catch {
+            // Silent fail: fast view already rendered.
+          }
+        })();
+
+        return;
+      }
+
+      // Load more path
+      const page = (get().groupPagination?.page ?? 1) + 1;
       const res = await axiosInstance.get<{ messages: Message[]; pagination: PaginationInfo }>(
         `/groups/${groupId}/messages`,
         { params: { page } }
@@ -125,14 +187,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
       const newMessages = res.data.messages;
       const reversedMessages = [...newMessages].reverse();
-
-      if (loadMore) {
-        // Prepend older messages to beginning (chronological order)
-        set({ groupMessages: mergeUniqueMessages(reversedMessages, get().groupMessages) });
-      } else {
-        set({ groupMessages: reversedMessages });
-      }
-
+      set({ groupMessages: mergeUniqueMessages(reversedMessages, get().groupMessages) });
       set({ groupPagination: res.data.pagination });
     } catch {
       toast.error("Failed to load messages");
@@ -224,6 +279,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       set({
         groups: get().groups.filter(g => g._id !== groupId),
         selectedGroup: get().selectedGroup?._id === groupId ? null : get().selectedGroup,
+        activeGroupId: get().activeGroupId === groupId ? null : get().activeGroupId,
+        unreadCounts: Object.fromEntries(
+          Object.entries(get().unreadCounts).filter(([id]) => id !== groupId)
+        ),
       });
       toast.success("Left group successfully");
     } catch {
@@ -237,6 +296,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       set({
         groups: get().groups.filter(g => g._id !== groupId),
         selectedGroup: get().selectedGroup?._id === groupId ? null : get().selectedGroup,
+        activeGroupId: get().activeGroupId === groupId ? null : get().activeGroupId,
+        unreadCounts: Object.fromEntries(
+          Object.entries(get().unreadCounts).filter(([id]) => id !== groupId)
+        ),
       });
       toast.success("Group deleted successfully");
     } catch {
@@ -244,7 +307,14 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
   },
 
-  setSelectedGroup: (group) => set({ selectedGroup: group, groupMessages: [], groupPagination: null }),
+  setSelectedGroup: (group) =>
+    set((state) => ({
+      selectedGroup: group,
+      activeGroupId: group?._id ?? null,
+      groupMessages: [],
+      groupPagination: null,
+      unreadCounts: group ? { ...state.unreadCounts, [group._id]: 0 } : state.unreadCounts,
+    })),
 
   setupSocketListeners: () => {
     const { socketListenersSetup } = get();
@@ -258,7 +328,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     socket.on(SOCKET_EVENTS.groupCreated, (group: Group) => {
       const { groups } = get();
       if (!groups.find(g => g._id === group._id)) {
-        set({ groups: [group, ...groups] });
+        set((state) => ({
+          groups: [group, ...groups],
+          unreadCounts: { ...state.unreadCounts, [group._id]: 0 },
+        }));
         toast.success(`You were added to group: ${group.name}`);
       }
     });
@@ -273,12 +346,35 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
     socket.on(SOCKET_EVENTS.newGroupMessage, (message: Message) => {
       const { selectedGroup, groupMessages } = get();
+      const authUserId = useAuthStore.getState().authUser?._id;
       if (selectedGroup?._id === message.groupId) {
         const withoutDupTemp = groupMessages.filter(
           (msg) => !(msg._id.startsWith("temp-") && isLikelySameOptimistic(msg, message))
         );
-        set({ groupMessages: mergeUniqueMessages(withoutDupTemp, [message]) });
+        set({
+          groupMessages: mergeUniqueMessages(withoutDupTemp, [message]),
+          unreadCounts: message.groupId
+            ? { ...get().unreadCounts, [message.groupId]: 0 }
+            : get().unreadCounts,
+        });
+        const senderId = typeof message.senderId === "object" ? message.senderId._id : message.senderId;
+        if (message.groupId && senderId !== authUserId) {
+          void get().markGroupAsRead(message.groupId);
+        }
+        return;
       }
+
+      if (!message.groupId) return;
+      const senderId = typeof message.senderId === "object" ? message.senderId._id : message.senderId;
+      set((state) => ({
+        unreadCounts: {
+          ...state.unreadCounts,
+          [message.groupId]:
+            senderId === authUserId
+              ? state.unreadCounts[message.groupId] ?? 0
+              : (state.unreadCounts[message.groupId] ?? 0) + 1,
+        },
+      }));
     });
 
     socket.on("removedFromGroup", (data: { groupId: string }) => {
@@ -286,6 +382,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       set({
         groups: groups.filter(g => g._id !== data.groupId),
         selectedGroup: selectedGroup?._id === data.groupId ? null : selectedGroup,
+        activeGroupId: get().activeGroupId === data.groupId ? null : get().activeGroupId,
+        unreadCounts: Object.fromEntries(
+          Object.entries(get().unreadCounts).filter(([id]) => id !== data.groupId)
+        ),
       });
       toast.error("You were removed from the group");
     });
@@ -295,8 +395,41 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       set({
         groups: groups.filter(g => g._id !== data.groupId),
         selectedGroup: selectedGroup?._id === data.groupId ? null : selectedGroup,
+        activeGroupId: get().activeGroupId === data.groupId ? null : get().activeGroupId,
+        unreadCounts: Object.fromEntries(
+          Object.entries(get().unreadCounts).filter(([id]) => id !== data.groupId)
+        ),
       });
       toast.error("Group was deleted");
     });
+  },
+
+  refreshGroupUnreadCounts: async () => {
+    try {
+      const res = await axiosInstance.get<Record<string, number>>("/groups/unread-counts");
+      set((state) => {
+        const next: Record<string, number> = {};
+        state.groups.forEach((group) => {
+          next[group._id] = res.data[group._id] ?? 0;
+        });
+        if (state.selectedGroup?._id) {
+          next[state.selectedGroup._id] = 0;
+        }
+        return { unreadCounts: next };
+      });
+    } catch {
+      // Silent fail to avoid noisy UI
+    }
+  },
+
+  markGroupAsRead: async (groupId) => {
+    try {
+      await axiosInstance.post(`/groups/${groupId}/read`);
+      set((state) => ({
+        unreadCounts: { ...state.unreadCounts, [groupId]: 0 },
+      }));
+    } catch {
+      // Silent fail; UI still updates locally.
+    }
   },
 }));

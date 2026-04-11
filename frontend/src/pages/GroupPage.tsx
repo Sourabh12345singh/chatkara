@@ -43,6 +43,8 @@ const GroupPage = () => {
     isMessagesLoading,
     groupPagination,
     setupSocketListeners,
+    unreadCounts,
+    refreshGroupUnreadCounts,
   } = useGroupStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -70,15 +72,29 @@ const GroupPage = () => {
 
   useEffect(() => {
     void getGroups();
-    void getUsers();
     setupSocketListeners();
-  }, [getGroups, getUsers, setupSocketListeners]);
+  }, [getGroups, setupSocketListeners]);
+
+  useEffect(() => {
+    void refreshGroupUnreadCounts();
+    const interval = setInterval(() => {
+      void refreshGroupUnreadCounts();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [refreshGroupUnreadCounts]);
+
+  useEffect(() => {
+    if (!showCreateModal && !showAddMemberModal) return;
+    if (users.length > 0) return;
+    void getUsers();
+  }, [showCreateModal, showAddMemberModal, users.length, getUsers]);
 
   useEffect(() => {
     if (!groupId) {
       setSelectedGroup(null);
       return;
     }
+    shouldAutoScrollRef.current = true;
     setSelectedGroup(null);
     void getGroupMessages(groupId);
   }, [groupId, setSelectedGroup, getGroupMessages]);
@@ -250,6 +266,11 @@ const GroupPage = () => {
                       {group.members.length} members
                     </p>
                   </div>
+                  {(unreadCounts[group._id] ?? 0) > 0 && (
+                    <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-content">
+                      {unreadCounts[group._id]}
+                    </span>
+                  )}
                 </div>
               );
             })

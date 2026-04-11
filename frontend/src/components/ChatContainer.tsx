@@ -13,8 +13,6 @@ const ChatContainer = () => {
     isMessagesLoading,
     selectedUser,
     pagination,
-    subscribeToMessages,
-    unsubscribeFromMessages,
   } =
     useChatStore();
   const { authUser } = useAuthStore();
@@ -28,16 +26,9 @@ const ChatContainer = () => {
 
   useEffect(() => {
     if (!selectedUser) return;
+    shouldAutoScrollRef.current = true;
     void getMessages(selectedUser._id);
   }, [selectedUser, getMessages]);
-
-  useEffect(() => {
-  subscribeToMessages();
-
-  return () => {
-    unsubscribeFromMessages();
-  };
-}, [selectedUser]);
 
   useEffect(() => {
     if (pendingScrollAdjustRef.current) return;

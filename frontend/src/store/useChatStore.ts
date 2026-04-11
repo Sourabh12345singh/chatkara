@@ -62,6 +62,7 @@ type ChatState = {
   getMessages: (userId: string, loadMore?: boolean) => Promise<void>;
   sendMessage: (messageData: ChatMessageInput) => Promise<void>;
   refreshUnreadCounts: () => Promise<void>;
+  markConversationAsRead: (userId: string) => Promise<void>;
   subscribeToGlobalMessages: () => void;
   unsubscribeFromGlobalMessages: () => void;
   subscribeToMessages: () => void;
@@ -164,6 +165,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
         }
       }
+      if (!loadMore) {
+        void get().markConversationAsRead(userId);
+      }
     } catch {
       toast.error("Failed to load messages");
     } finally {
@@ -227,10 +231,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         state.users.forEach((user) => {
           next[user._id] = res.data[user._id] ?? 0;
         });
+        if (state.selectedUser?._id) {
+          next[state.selectedUser._id] = 0;
+        }
         return { unreadCounts: next };
       });
     } catch {
       // Silent fail to avoid noisy UI
+    }
+  },
+
+  markConversationAsRead: async (userId) => {
+    try {
+      await axiosInstance.post(API_ROUTES.messages.markRead(userId));
+      set((state) => ({
+        unreadCounts: { ...state.unreadCounts, [userId]: 0 },
+      }));
+    } catch {
+      // Silent fail; UI still updates locally.
     }
   },
 
@@ -262,6 +280,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           users: sortUsersByLastInteraction(state.users, { ...state.lastInteraction, [selectedUser._id]: timestamp }),
           unreadCounts: { ...state.unreadCounts, [selectedUser._id]: 0 },
         }));
+        if (senderId !== authUser._id) {
+          void get().markConversationAsRead(selectedUser._id);
+        }
         return;
       }
 

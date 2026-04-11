@@ -169,6 +169,9 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       return res.status(403).json({ message: "You are not a member of this group" });
     }
 
+    group.lastRead.set(userId.toString(), new Date());
+    await group.save();
+
     // Pagination params - already uses index on groupId + createdAt
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 30;
@@ -198,6 +201,58 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
   }
 };
 
+export const getGroupUnreadCounts = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const groups = await Group.find({ members: userId }).select("_id lastRead");
+    const userIdString = userId.toString();
+
+    const counts = await Promise.all(
+      groups.map(async (group) => {
+        const lastReadAt = group.lastRead?.get(userIdString) ?? new Date(0);
+        const unread = await Message.countDocuments({
+          groupId: group._id,
+          senderId: { $ne: userId },
+          createdAt: { $gt: lastReadAt },
+        });
+        return { groupId: group._id.toString(), count: unread };
+      })
+    );
+
+    const result: Record<string, number> = {};
+    counts.forEach((entry) => {
+      result[entry.groupId] = entry.count;
+    });
+
+    res.status(200).json(result);
+  } catch {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const markGroupRead = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!group.members.some((m) => m.toString() === userId)) {
+      return res.status(403).json({ message: "You are not a member of this group" });
+    }
+
+    group.lastRead.set(userId.toString(), new Date());
+    await group.save();
+
+    res.status(200).json({ success: true });
+  } catch {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 export const sendGroupMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
@@ -210,6 +265,9 @@ export const sendGroupMessage = async (req: AuthenticatedRequest, res: Response)
     );
 
     if (!senderId) return res.status(401).json({ message: "Unauthorized" });
+    if (!groupId || Array.isArray(groupId)) {
+      return res.status(400).json({ message: "Invalid group id" });
+    }
 
     const group = await Group.findById(groupId);
     if (!group) return res.status(404).json({ message: "Group not found" });
@@ -252,6 +310,7 @@ export const sendGroupMessage = async (req: AuthenticatedRequest, res: Response)
 
     // Update group's lastMessage
     group.lastMessage = newMessage._id;
+    group.lastRead.set(senderId.toString(), new Date());
     await group.save();
 
     res.status(201).json(populatedMessage);

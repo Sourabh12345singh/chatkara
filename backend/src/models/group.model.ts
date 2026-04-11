@@ -7,6 +7,11 @@ const groupSchema = new mongoose.Schema(
     admin: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
+    lastRead: {
+      type: Map,
+      of: Date,
+      default: {},
+    },
   },
   { timestamps: true }
 );

@@ -22,12 +22,15 @@ export const API_ROUTES = {
   messages: {
     getUsers: "/messages/users",
     getUnreadCounts: "/messages/unread-counts",
+    markRead: (userId: string) => `/messages/read/${userId}`,
     getMessages: (userId: string) => `/messages/${userId}`,
     sendMessage: (userId: string) => `/messages/send/${userId}`,
   },
   groups: {
     create: "/groups",
     getAll: "/groups",
+    getUnreadCounts: "/groups/unread-counts",
+    markRead: (groupId: string) => `/groups/${groupId}/read`,
     getMessages: (groupId: string) => `/groups/${groupId}/messages`,
     sendMessage: (groupId: string) => `/groups/${groupId}/messages`,
     update: (groupId: string) => `/groups/${groupId}`,

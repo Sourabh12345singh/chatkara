@@ -146,6 +146,33 @@ export const getMessages = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
+export const markConversationRead = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: otherUserId } = req.params;
+    const myId = req.user?._id;
+    if (!myId || !otherUserId || Array.isArray(otherUserId)) {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    const conversationId = getConversationId(myId, otherUserId);
+    await Conversation.findOneAndUpdate(
+      { conversationId },
+      {
+        $set: { [`lastRead.${myId.toString()}`]: new Date() },
+        $setOnInsert: {
+          conversationId,
+          participants: [myId, otherUserId],
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ success: true });
+  } catch {
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id: receiverId } = req.params;
